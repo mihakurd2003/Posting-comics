@@ -33,7 +33,7 @@ def get_comic(url: str, filename):
     return comment
 
 
-def download_comic(token, group_id, filename):
+def upload_comic(token, group_id, filename):
     headers = {'Authorization': f'Bearer {token}'}
     upload_server_response = requests.get(
         url='https://api.vk.com/method/photos.getWallUploadServer',
@@ -50,31 +50,37 @@ def download_comic(token, group_id, filename):
     upload_response.raise_for_status()
     raise_vk_response(upload_response)
 
-    return upload_response
+    upload_response = upload_response.json()
+
+    return upload_response['photo'], upload_response['server'], upload_response['hash']
 
 
-def save_photo(group_id, token, response):
-    response = response.json()
+def save_photo(group_id, token, photo_upload_response, server_upload_response, hash_upload_response):
     headers = {'Authorization': f'Bearer {token}'}
     saving_comic_response = requests.post(
         url='https://api.vk.com/method/photos.saveWallPhoto',
-        params={'v': 5.131,
-                'group_id': group_id,
-                'photo': response['photo'],
-                'server': response['server'],
-                'hash': response['hash']
-                },
+        params={
+            'v': 5.131,
+            'group_id': group_id,
+            'photo': photo_upload_response,
+            'server': server_upload_response,
+            'hash': hash_upload_response,
+        },
         headers=headers,
     )
     saving_comic_response.raise_for_status()
     raise_vk_response(saving_comic_response)
-    return saving_comic_response
+
+    saving_comic_response = saving_comic_response.json()
+    owner_id = saving_comic_response["response"][0]["owner_id"]
+    photo_id = saving_comic_response["response"][0]["id"]
+
+    return owner_id, photo_id
 
 
-def post_photo(group_id, token, comment, response):
-    response = response.json()
+def post_photo(group_id, token, comment, owner_id, photo_id):
     headers = {'Authorization': f'Bearer {token}'}
-    attachments = f'photo{response["response"][0]["owner_id"]}_{response["response"][0]["id"]}'
+    attachments = f'photo{owner_id}_{photo_id}'
     posting_comic_response = requests.post(
         url='https://api.vk.com/method/wall.post',
         params={
@@ -91,14 +97,25 @@ def post_photo(group_id, token, comment, response):
 
 def main():
     load_dotenv()
-    vk_token, vk_group_id, last_comic_num = os.environ['VK_TOKEN'], os.environ['VK_GROUP_ID'], 2733
+    vk_token, vk_group_id = os.environ['VK_TOKEN'], os.environ['VK_GROUP_ID']
+    last_comic_num = 2733
     comic_num = random.randint(0, last_comic_num)
 
     try:
         comment = get_comic(url='https://xkcd.com/', filename=comic_num)
-        upload_response = download_comic(vk_token, vk_group_id, filename=comic_num)
-        saving_comic_response = save_photo(vk_group_id, vk_token, upload_response)
-        post_photo(vk_group_id, vk_token, comment, saving_comic_response)
+        photo_upload_response, server_upload_response, hash_upload_response = upload_comic(vk_token, vk_group_id, filename=comic_num)
+        photo_owner_id, photo_id = save_photo(
+            vk_group_id, vk_token,
+            photo_upload_response=photo_upload_response,
+            server_upload_response=server_upload_response,
+            hash_upload_response=hash_upload_response,
+        )
+        post_photo(
+            vk_group_id, vk_token,
+            comment=comment,
+            owner_id=photo_owner_id,
+            photo_id=photo_id,
+        )
 
     except VkApiError:
         print(traceback.format_exc(), file=sys.stderr)
@@ -112,4 +129,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
